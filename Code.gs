@@ -1553,7 +1553,7 @@ function debugForgotPasswordEligibility() {
 /* Public booking extension. All helper functions are private to Apps Script. */
 function portalLock_(fn) {
   const lock=LockService.getScriptLock(); lock.waitLock(20000);
-  try { return fn(); } finally { SpreadsheetApp.flush(); lock.releaseLock(); }
+  try { return fn(); } finally { try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); } }
 }
 const PORTAL_REQUEST_HEADERS=["request_id","email","name","organization","room_name","book_date","start_time","end_time","purpose","status","created_at","decided_at","decided_by","reason","booking_id"];
 const PORTAL_APPROVER_HEADERS=["email","active","updated_by","updated_at"];
@@ -1569,7 +1569,7 @@ function portalWrite_(sh,row,values) {
   const headers=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
   const old=row?sh.getRange(row,1,1,headers.length).getValues()[0]:headers.map(()=>"");
   headers.forEach((h,i)=>{if(Object.prototype.hasOwnProperty.call(values,h)){let v=values[h];old[i]=typeof v==="string"&&/^[=+@-]/.test(v)?"'"+v:v;}});
-  sh.getRange(row||sh.getLastRow()+1,1,1,headers.length).setValues([old]);
+  sh.getRange(row||sh.getLastRow()+1,1,1,headers.length).setNumberFormat("@").setValues([old]);
 }
 function portalRoles_(email) {
   const admin=String(PropertiesService.getScriptProperties().getProperty("BOOKING_ADMIN_EMAILS")||"").split(",").map(normalizeEmail_).includes(email);
@@ -1582,6 +1582,7 @@ function portalMail_(email,subject,message){try{MailApp.sendEmail(email,subject,
 function portalDispatch_(b) {
   const a=b.action, props=PropertiesService.getScriptProperties();
   if(a==="portalAvailability"){
+    if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
     const date=String(b.book_date||""); if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return portalError_("Invalid date");
     return {ok:true,rooms:ROOMS,bookings:getActiveRoomBookingsByDate_(date).map(r=>({room_name:r.room_name,start_time:r.start_time,end_time:r.end_time}))};
   }
@@ -1617,7 +1618,7 @@ function portalDispatch_(b) {
     const email=CacheService.getScriptCache().get("portal_guest_"+sha256Hex_(String(b.guest_token||"")));
     if(!email)return portalError_("Verify your email again");
     if(a==="portalMyRequests")return {ok:true,requests:portalRows_(portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS)).filter(r=>r.email===email)};
-    if(findAllowedUserByEmail_(email)&&findUserByEmail_(email))return portalError_("Please sign in as ISE Internal User");
+    if(findAllowedUserByEmail_(email)||findUserByEmail_(email))return portalError_("Please sign in as ISE Internal User");
     return portalLock_(function(){
       const room=String(b.room_name||""),date=String(b.book_date||""),start=String(b.start_time||""),end=String(b.end_time||"");
       const name=String(b.name||"").trim(),org=String(b.organization||"").trim(),purpose=String(b.purpose||"").trim();
