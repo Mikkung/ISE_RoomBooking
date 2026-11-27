@@ -1,0 +1,1 @@
+module.exports={testDir:'./tests/browser',timeout:30000,workers:1,reporter:'list',use:{headless:true,channel:'chrome',screenshot:'only-on-failure'},projects:[{name:'desktop',use:{viewport:{width:1440,height:1000}}},{name:'mobile',use:{viewport:{width:390,height:844}}},{name:'tablet',use:{viewport:{width:820,height:1180}}}]};

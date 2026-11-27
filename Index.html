@@ -146,7 +146,7 @@
 
     function Panel({ title, subtitle, right, children, className = "" }) {
       return (
-        <section className={`glass border border-white/60 rounded-[28px] shadow-[0_20px_60px_-25px_rgba(15,23,42,0.20)] p-5 md:p-6 ${className}`}>
+        <section className={`min-w-0 glass border border-white/60 rounded-[28px] shadow-[0_20px_60px_-25px_rgba(15,23,42,0.20)] p-5 md:p-6 ${className}`}>
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
               <h2 className="text-xl font-black tracking-tight text-slate-900">{title}</h2>
@@ -778,15 +778,15 @@
               <MetricCard title="Busiest Room" value={summary.busiest?.room || "-"} note={summary.busiest ? formatDuration(summary.busiest.minutes) : "No bookings"} accent="from-violet-600 to-fuchsia-500" />
             </div>
 
-            <div className="grid xl:grid-cols-[1.55fr_0.95fr] gap-6">
-              <div className="space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-[1.55fr_0.95fr] gap-6">
+              <div className="min-w-0 space-y-6">
                 <Panel
                   title={viewMode === "calendar" ? "Monthly Calendar" : "Visual Schedule"}
                   subtitle={viewMode === "day" ? formatDateDisplay(selectedDate) : viewMode === "week" ? "Next 7 days overview" : `Availability overview for ${new Date(`${calendarMonth}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}`}
                   right={viewMode === "calendar" ? <div className="text-xs font-semibold text-slate-500">Click a date to jump to day view</div> : null}
                 >
                   {viewMode === "day" ? (
-                    <div className="space-y-5">
+                    <div className="overflow-x-auto"><div className="space-y-5 min-w-[720px]">
                       <div className="grid gap-4 items-end" style={{ gridTemplateColumns: "240px minmax(0,1fr)" }}>
                         <div></div>
                         <div className="px-1">
@@ -842,6 +842,7 @@
                           </div>
                         </div>
                       ))}
+                    </div>
                     </div>
                   ) : viewMode === "week" ? (
                     <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -938,7 +939,7 @@
                 </Panel>
               </div>
 
-              <div className="space-y-6">
+              <div className="min-w-0 space-y-6">
                 <Panel title="Create Booking" subtitle="Recurring booking supported">
                   <div className="space-y-5">
                     <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-slate-950 shadow-sm">
@@ -1648,7 +1649,7 @@
       {field("Full name","name")}{field("Organization / Department","organization")}{field("Purpose","purpose")}{field("Email","email","email")}
       {!token&&<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{await call("portalSendCode",{email:f.email});Q(true);M("Verification code sent");})}>Send verification code</button>}
       {!token&&sent&&<>{field("Verification code","code")}<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{const r=await call("portalVerifyCode",{email:f.email,code:f.code});T(r.guest_token);const q=await call("portalMyRequests",{guest_token:r.guest_token});R(q.requests);M("Email verified");})}>Verify email</button></>}
-      {token&&<><p className="text-green-700">Email verified</p><button disabled={busy||clash||duration<=0||!f.name.trim()||!f.purpose.trim()} className="w-full bg-slate-900 text-white rounded-xl p-3 disabled:opacity-40" onClick={()=>run(async()=>{const r=await call("portalSubmit",{...f,guest_token:token});M("Pending approval: "+r.request_id);const q=await call("portalMyRequests",{guest_token:token});R(q.requests);})}>Submit for approval</button><button className="underline" disabled={busy} onClick={()=>run(async()=>R((await call("portalMyRequests",{guest_token:token})).requests))}>Refresh my requests</button></>}
+      {token&&<><p className="text-green-700">Email verified</p><button disabled={busy||clash||!Number.isFinite(duration)||duration<=0||!f.book_date||!f.name.trim()||!f.purpose.trim()} className="w-full bg-slate-900 text-white rounded-xl p-3 disabled:opacity-40" onClick={()=>run(async()=>{const r=await call("portalSubmit",{...f,guest_token:token});M("Pending approval: "+r.request_id);const q=await call("portalMyRequests",{guest_token:token});R(q.requests);})}>Submit for approval</button><button className="underline" disabled={busy} onClick={()=>run(async()=>R((await call("portalMyRequests",{guest_token:token})).requests))}>Refresh my requests</button></>}
       <p role="status" className="break-words">{msg}</p></section>
       {requests.map(r=><article key={r.request_id} className="border rounded-xl p-4 bg-white"><b>{r.room_name}</b><p>{r.book_date} · {r.start_time}–{r.end_time}</p><p>{r.status} {r.reason}</p></article>)}</main>;
     }
@@ -1659,7 +1660,7 @@
       const run=async(fn)=>{B(true);M("");try{await fn();}catch(e){M(e.message);}finally{B(false);}};
       useEffect(()=>{run(refresh);},[]);
       return <main className="max-w-4xl mx-auto p-4 space-y-4"><button onClick={back} className="underline">Back to dashboard</button><h1 className="text-2xl font-bold">Approval Center</h1><button disabled={busy} onClick={()=>run(refresh)} className="border rounded-xl p-2">Refresh</button><p role="status">{msg}</p>
-      {roles.approver&&req.map(r=><section key={r.request_id} className="bg-white border rounded-xl p-4 space-y-2 break-words"><b>{r.room_name}</b><p>{r.book_date} · {r.start_time}–{r.end_time}</p><p>{r.name} · {r.organization} · {r.email}</p><p>{r.purpose}</p><p>{r.status} {r.reason}</p>{r.status==="PENDING"&&<div className="flex gap-2">{["APPROVED","REJECTED"].map(decision=><button key={decision} disabled={busy} className="border rounded-lg p-2" onClick={()=>{const reason=decision==="REJECTED"?window.prompt("Reason for rejection"):"";if(decision==="REJECTED"&&!reason)return;run(async()=>{const x=await call("portalDecide",{request_id:r.request_id,decision,reason});await refresh();M(x.notified?"Decision saved":"Decision saved; email notification failed");});}}>{decision==="APPROVED"?"Approve":"Reject"}</button>)}</div>}</section>)}
+      {roles.approver&&req.map(r=><section key={r.request_id} className="bg-white border rounded-xl p-4 space-y-2 break-words"><b>{r.room_name}</b><p>{r.book_date} · {r.start_time}–{r.end_time}</p><p>{r.name} · {r.organization} · {r.email}</p><p>{r.purpose}</p><p>{r.status} {r.reason}</p>{r.status==="PENDING"&&<div className="flex flex-wrap gap-2">{["APPROVED","REJECTED"].map(decision=><button key={decision} disabled={busy} className="border rounded-lg p-2" onClick={()=>{const reason=decision==="REJECTED"?window.prompt("Reason for rejection"):"";if(decision==="REJECTED"&&!reason)return;run(async()=>{const x=await call("portalDecide",{request_id:r.request_id,decision,reason});await refresh();M(x.already_decided?"Decision already saved":x.notified?"Decision saved":"Decision saved; email notification failed");});}}>{decision==="APPROVED"?"Approve":"Reject"}</button>)}</div>}</section>)}
       {roles.admin&&<section className="border rounded-xl p-4 space-y-3"><h2 className="font-bold">Manage Approvers</h2>{data.approvers.filter(x=>x.active==="TRUE").map(x=><div key={x.email} className="flex flex-wrap gap-2 items-center"><span className="break-all">{x.email}</span><button disabled={busy} className="border rounded p-2" onClick={()=>run(async()=>D(await call("portalSetApprover",{email:x.email,active:false})))}>Revoke</button></div>)}<select className="w-full border rounded p-3" value={target} onChange={e=>T(e.target.value)}><option value="">Select ISE Internal User</option>{data.users.filter(u=>!data.approvers.some(x=>x.email===u.email&&x.active==="TRUE")).map(u=><option key={u.email} value={u.email}>{u.name} ({u.email})</option>)}</select><button disabled={busy||!target} className="border rounded p-3" onClick={()=>run(async()=>{D(await call("portalSetApprover",{email:target,active:true}));T("");})}>Grant approval access</button></section>}
       {!busy&&!roles.approver&&<p>No approval access.</p>}</main>;
     }
@@ -1705,7 +1706,10 @@
       if(page==="guest"||(!page&&route.mode==="guest"))return <PublicBookingPortal back={()=>setPage("dashboard")}/>;
       if(page==="admin")return <BookingAdministration back={()=>setPage("dashboard")}/>;
       return <RoomBookingDashboard openGuest={()=>setPage("guest")} openAdmin={()=>setPage("admin")}/>;
-      return <RoomDisplayApp />;
     }
 
     root.render(<AppRoot />);
+
+  </script>
+</body>
+</html>
