@@ -84,6 +84,7 @@ function apiRouter(body) {
 function dispatchAction_(body) {
   const action = String(body.action || "").trim();
 
+  if (action.indexOf("portal") === 0) return portalDispatch_(body);
   if (action === "ping") return { ok: true, msg: "pong" };
   if (action === "roomLogin") return handleRoomLoginData_(body);
   if (action === "roomGetSession") return handleRoomGetSessionData_(body);
@@ -1089,7 +1090,8 @@ function handleFetchRoomDashboardSummaryData_(body) {
   return { ok: true, book_date: bookDate, summary: buildDashboardSummary_(bookDate, bookings) };
 }
 
-function handleBookRoomDashboardData_(body) {
+function handleBookRoomDashboardData_(body) { return portalLock_(function(){ return handleBookRoomDashboardData_Unlocked_(body); }); }
+function handleBookRoomDashboardData_Unlocked_(body) {
   const auth = requireRoomSession_(body);
   if (!auth.ok) return auth;
 
@@ -1175,7 +1177,8 @@ function handleBookRoomDashboardData_(body) {
   };
 }
 
-function handleCancelRoomBookingDashboardData_(body) {
+function handleCancelRoomBookingDashboardData_(body) { return portalLock_(function(){ return handleCancelRoomBookingDashboardData_Unlocked_(body); }); }
+function handleCancelRoomBookingDashboardData_Unlocked_(body) {
   const auth = requireRoomSession_(body);
   if (!auth.ok) return auth;
 
@@ -1433,7 +1436,8 @@ function handleFetchRoomDisplayScheduleData_(body) {
   };
 }
 
-function handleBookRoomFromDisplayData_(body) {
+function handleBookRoomFromDisplayData_(body) { return portalLock_(function(){ return handleBookRoomFromDisplayData_Unlocked_(body); }); }
+function handleBookRoomFromDisplayData_Unlocked_(body) {
   const auth = requireDisplayDevice_(body);
   if (!auth.ok) return auth;
 
@@ -1544,4 +1548,126 @@ function debugForgotPasswordEligibility_() {
 function debugForgotPasswordEligibility() {
   return debugForgotPasswordEligibility_()
 }
+}
+
+/* Public booking extension. All helper functions are private to Apps Script. */
+function portalLock_(fn) {
+  const lock=LockService.getScriptLock(); lock.waitLock(20000);
+  try { return fn(); } finally { SpreadsheetApp.flush(); lock.releaseLock(); }
+}
+const PORTAL_REQUEST_HEADERS=["request_id","email","name","organization","room_name","book_date","start_time","end_time","purpose","status","created_at","decided_at","decided_by","reason","booking_id"];
+const PORTAL_APPROVER_HEADERS=["email","active","updated_by","updated_at"];
+function portalSheet_(name,headers) {
+  const sh=getOrCreateSheet_(ROOM_SHEET_ID,name);
+  ensureHeadersAndMap_(sh,headers); return sh;
+}
+function portalRows_(sh) {
+  const rows=sh.getDataRange().getDisplayValues(), headers=rows.shift();
+  return rows.map((row,i)=>{const o={row:i+2};headers.forEach((h,j)=>o[h]=row[j]);return o;});
+}
+function portalWrite_(sh,row,values) {
+  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0];
+  const old=row?sh.getRange(row,1,1,headers.length).getValues()[0]:headers.map(()=>"");
+  headers.forEach((h,i)=>{if(Object.prototype.hasOwnProperty.call(values,h)){let v=values[h];old[i]=typeof v==="string"&&/^[=+@-]/.test(v)?"'"+v:v;}});
+  sh.getRange(row||sh.getLastRow()+1,1,1,headers.length).setValues([old]);
+}
+function portalRoles_(email) {
+  const admin=String(PropertiesService.getScriptProperties().getProperty("BOOKING_ADMIN_EMAILS")||"").split(",").map(normalizeEmail_).includes(email);
+  const approver=admin||portalRows_(portalSheet_("BookingApprovers",PORTAL_APPROVER_HEADERS)).some(r=>normalizeEmail_(r.email)===email&&r.active==="TRUE");
+  return {admin:admin,approver:approver};
+}
+function portalError_(error){return {ok:false,error:error};}
+function portalToken_(){return Utilities.getUuid()+Utilities.getUuid();}
+function portalMail_(email,subject,message){try{MailApp.sendEmail(email,subject,message);return true;}catch(e){return false;}}
+function portalDispatch_(b) {
+  const a=b.action, props=PropertiesService.getScriptProperties();
+  if(a==="portalAvailability"){
+    const date=String(b.book_date||""); if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return portalError_("Invalid date");
+    return {ok:true,rooms:ROOMS,bookings:getActiveRoomBookingsByDate_(date).map(r=>({room_name:r.room_name,start_time:r.start_time,end_time:r.end_time}))};
+  }
+  if(a==="portalSendCode"){
+    const email=normalizeEmail_(b.email);
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return portalError_("Invalid email");
+    if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
+    return portalLock_(function(){
+      const cache=CacheService.getScriptCache(), key="portal_otp_"+sha256Hex_(email);
+      if(cache.get(key))return portalError_("Please wait before requesting another code");
+      const day=fmtDate_(nowBangkok_()), quotaKey="PORTAL_OTP_QUOTA", quota=JSON.parse(props.getProperty(quotaKey)||"{}");
+      const count=quota.day===day?Number(quota.count||0):0;
+      if(count>=100)return portalError_("Daily verification limit reached");
+      props.setProperty(quotaKey,JSON.stringify({day:day,count:count+1}));
+      const code=String(parseInt(Utilities.getUuid().replace(/-/g,"").slice(0,8),16)%1000000).padStart(6,"0");
+      cache.put(key,JSON.stringify({hash:sha256Hex_(email+code),attempts:0,expires:Date.now()+600000}),600);
+      if(!portalMail_(email,"ISE Room Booking verification","Your verification code: "+code+" (valid for 10 minutes)")){cache.remove(key);return portalError_("Unable to send code");}
+      return {ok:true};
+    });
+  }
+  if(a==="portalVerifyCode"){
+    return portalLock_(function(){
+      const email=normalizeEmail_(b.email),cache=CacheService.getScriptCache(),key="portal_otp_"+sha256Hex_(email),raw=cache.get(key);
+      if(!raw)return portalError_("Invalid or expired code");
+      const v=JSON.parse(raw);
+      if(v.expires<Date.now()||v.attempts>=5){cache.remove(key);return portalError_("Invalid or expired code");}
+      if(v.hash!==sha256Hex_(email+String(b.code||""))){v.attempts++;cache.put(key,JSON.stringify(v),Math.max(1,Math.ceil((v.expires-Date.now())/1000)));return portalError_("Invalid or expired code");}
+      cache.remove(key);const token=portalToken_();cache.put("portal_guest_"+sha256Hex_(token),email,3600);return {ok:true,guest_token:token};
+    });
+  }
+  if(a==="portalSubmit"||a==="portalMyRequests"){
+    if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
+    const email=CacheService.getScriptCache().get("portal_guest_"+sha256Hex_(String(b.guest_token||"")));
+    if(!email)return portalError_("Verify your email again");
+    if(a==="portalMyRequests")return {ok:true,requests:portalRows_(portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS)).filter(r=>r.email===email)};
+    if(findAllowedUserByEmail_(email)&&findUserByEmail_(email))return portalError_("Please sign in as ISE Internal User");
+    return portalLock_(function(){
+      const room=String(b.room_name||""),date=String(b.book_date||""),start=String(b.start_time||""),end=String(b.end_time||"");
+      const name=String(b.name||"").trim(),org=String(b.organization||"").trim(),purpose=String(b.purpose||"").trim();
+      if(!ROOMS.includes(room)||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<fmtDate_(nowBangkok_())||!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||start>=end||!name||!purpose||name.length>200||org.length>200||purpose.length>1000)return portalError_("Invalid booking details");
+      const sh=portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS),rows=portalRows_(sh);
+      if(rows.some(r=>r.email===email&&r.room_name===room&&r.book_date===date&&r.start_time===start&&r.end_time===end&&r.status==="PENDING"))return portalError_("Request already pending");
+      if(getActiveRoomBookingsByDate_(date).some(r=>r.room_name===room&&isOverlap_(r.start_time,r.end_time,start,end)))return portalError_("Time is unavailable");
+      const id="REQ_"+Utilities.getUuid();portalWrite_(sh,0,{request_id:id,email:email,name:name,organization:org,room_name:room,book_date:date,start_time:start,end_time:end,purpose:purpose,status:"PENDING",created_at:fmtDateTime_(nowBangkok_())});
+      const recipients=portalRows_(portalSheet_("BookingApprovers",PORTAL_APPROVER_HEADERS)).filter(r=>r.active==="TRUE").map(r=>r.email).concat(String(props.getProperty("BOOKING_ADMIN_EMAILS")||"").split(",").map(normalizeEmail_));
+      [...new Set(recipients)].filter(e=>e&&findAllowedUserByEmail_(e)&&findUserByEmail_(e)).forEach(e=>portalMail_(e,"ISE Room Booking: new request","Review request "+id+" in Approval Center."));
+      return {ok:true,request_id:id};
+    });
+  }
+  const auth=requireRoomSession_(b);if(!auth.ok)return auth;
+  const email=auth.allowed.requester_email,roles=portalRoles_(email);
+  if(a==="portalRoles")return {ok:true,...roles};
+  if(a==="portalApprovers"||a==="portalSetApprover"){
+    if(!roles.admin)return portalError_("Admin access required");
+    return portalLock_(function(){
+      const sh=portalSheet_("BookingApprovers",PORTAL_APPROVER_HEADERS);
+      if(a==="portalSetApprover"){
+        const target=normalizeEmail_(b.email);if(!findAllowedUserByEmail_(target)||!findUserByEmail_(target))return portalError_("Select an eligible ISE Internal User");
+        const row=portalRows_(sh).find(r=>normalizeEmail_(r.email)===target);
+        portalWrite_(sh,row&&row.row,{email:target,active:b.active===true?"TRUE":"FALSE",updated_by:email,updated_at:fmtDateTime_(nowBangkok_())});
+      }
+      const us=getUserSheet_(),m=us.map,values=us.sh.getDataRange().getValues().slice(1);
+      return {ok:true,approvers:portalRows_(sh),users:values.map(r=>({email:normalizeEmail_(r[m.email-1]),name:String(r[m.name-1]||"")})).filter(u=>u.email&&findAllowedUserByEmail_(u.email))};
+    });
+  }
+  if(!roles.approver)return portalError_("Approver access required");
+  if(a==="portalRequests")return {ok:true,requests:portalRows_(portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS))};
+  if(a==="portalDecide")return portalLock_(function(){
+    if(!portalRoles_(email).approver)return portalError_("Approver access required");
+    const sh=portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS),r=portalRows_(sh).find(x=>x.request_id===b.request_id);
+    if(!r||r.status!=="PENDING")return portalError_("Request already decided or not found");
+    if(!["APPROVED","REJECTED"].includes(b.decision))return portalError_("Invalid decision");
+    const reason=String(b.reason||"").trim();if(b.decision==="REJECTED"&&!reason)return portalError_("Reason required");
+    const id="RB_"+r.request_id,now=fmtDateTime_(nowBangkok_());
+    if(b.decision==="APPROVED"){
+      if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
+      if(r.book_date<fmtDate_(nowBangkok_()))return portalError_("Booking date has passed");
+      const existing=findBookingRowById_(id);
+      if(!existing){
+        if(getActiveRoomBookingsByDate_(r.book_date).some(x=>x.room_name===r.room_name&&isOverlap_(x.start_time,x.end_time,r.start_time,r.end_time)))return portalError_("Time is no longer available");
+        appendRoomBookingRecord_({booking_id:id,room_name:r.room_name,book_date:r.book_date,start_time:r.start_time,end_time:r.end_time,purpose:"External booking",note:"",requester_emp_id:"",requester_name:"External User",requester_email:r.email,status:"ACTIVE",created_at:now,updated_at:now,display_source:"external_portal"});
+      }
+    }
+    portalWrite_(sh,r.row,{status:b.decision,decided_at:now,decided_by:email,reason:reason,booking_id:b.decision==="APPROVED"?id:""});
+    const notified=portalMail_(r.email,"ISE Room Booking: "+b.decision,"Request "+r.request_id+"\n"+r.room_name+"\n"+r.book_date+" "+r.start_time+"–"+r.end_time+"\n"+reason);
+    return {ok:true,notified:notified};
+  });
+  return portalError_("Unknown action");
 }
