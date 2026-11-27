@@ -180,7 +180,7 @@
       );
     }
 
-    function RoomBookingDashboard({openGuest,openAdmin}) {
+    function RoomBookingDashboard({openGuest,openAdmin,redirectEmail="",redirectNotice=""}) {
       const [portalRoles,setPortalRoles]=useState({});
       const [selectedDate, setSelectedDate] = useState(todayKey());
       const [calendarMonth, setCalendarMonth] = useState(todayKey().slice(0, 7));
@@ -197,7 +197,7 @@
       const [currentUser, setCurrentUser] = useState(null);
       const [authMode, setAuthMode] = useState("login");
       const [authForm, setAuthForm] = useState({
-        email: "", password: "", code: "", new_password: "", confirm_password: ""
+        email: redirectEmail, password: "", code: "", new_password: "", confirm_password: ""
       });
       const [form, setForm] = useState({
         room_name: ROOMS[0],
@@ -634,9 +634,12 @@
                   Secure Access
                 </div>
                 <h1 className="mt-4 text-3xl md:text-4xl font-black tracking-tight">ISE Room Booking Dashboard</h1>
-                <p className="mt-3 max-w-2xl text-slate-300">
-                  Sign in with your approved email and password to view schedules, book rooms, and manage your reservations.
-                </p>
+                <p className="mt-3 max-w-2xl text-slate-300">Choose your booking access. ISE Internal Users sign in to book directly; Chulalongkorn University guests submit requests for approval.</p>
+                <button type="button" onClick={openGuest} className="mt-6 w-full text-left rounded-2xl bg-white text-slate-900 border-2 border-rose-200 shadow-lg p-5 hover:bg-rose-50 focus:ring-4 focus:ring-rose-300">
+                  <span className="block text-2xl font-black">External User →</span>
+                  <span className="block mt-1 font-semibold">Request a room</span>
+                  <span className="block mt-2 text-sm text-slate-600">@chula.ac.th or @student.chula.ac.th · Approval required</span>
+                </button>
               </div>
 
               <section className="glass border border-white/60 rounded-[28px] shadow-[0_20px_60px_-25px_rgba(15,23,42,0.20)] p-5 md:p-6 bg-white text-slate-800">
@@ -644,6 +647,7 @@
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-xl font-black tracking-tight text-slate-900">ISE Internal User</h2>
+                      {redirectNotice&&<p role="alert" className="mt-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 p-3 text-sm">{redirectNotice}</p>}
                       <p className="text-sm text-slate-500 mt-1">Use the same allowed user sheet and account from your existing system.</p>
                     </div>
                     <Field label="Email">
@@ -717,7 +721,7 @@
               </div>
             )}
             {AuthShell}
-            <div className="max-w-7xl mx-auto px-5 pb-5"><button onClick={openGuest} className="border rounded-xl bg-white p-3 font-semibold">External User — Request a room</button></div>
+
           </div>
         );
       }
@@ -1629,11 +1633,11 @@
     }
 
 
-    function PublicBookingPortal({back}) {
+    function PublicBookingPortal({back,onInternal}) {
       const [f,S]=useState({email:"",code:"",name:"",organization:"",room_name:ROOMS[0],book_date:todayKey(),start_time:"09:00",end_time:"10:00",purpose:""});
       const [token,T]=useState("");const [sent,Q]=useState(false);const [busy,B]=useState(false);const [msg,M]=useState("");const [slots,V]=useState([]);const [requests,R]=useState([]);
       const change=(k,v)=>S(p=>({...p,[k]:v}));
-      const call=async(action,extra={})=>{const r=await apiPost({action,...extra});if(!r.ok)throw Error(r.error);return r;};
+      const call=async(action,extra={})=>{const r=await apiPost({action,...extra});if(!r.ok){if(r.error_code==="ISE_INTERNAL_USER")onInternal(normalizeEmail(f.email),r.error);throw Error(r.error);}return r;};
       useEffect(()=>{let live=true;V([]);call("portalAvailability",{book_date:f.book_date}).then(r=>{if(live)V(r.bookings||[]);}).catch(e=>{if(live)M(e.message);});return()=>{live=false;};},[f.book_date]);
       const run=async(fn)=>{B(true);M("");try{await fn();}catch(e){M(e.message);}finally{B(false);}};
       const duration=(Number(f.end_time.slice(0,2))*60+Number(f.end_time.slice(3))-Number(f.start_time.slice(0,2))*60-Number(f.start_time.slice(3)))/60;
@@ -1647,6 +1651,7 @@
       <Field label="Duration (hours)"><select className="w-full border rounded-xl p-3" value={duration} onChange={e=>{const m=Number(f.start_time.slice(0,2))*60+Number(f.start_time.slice(3))+Number(e.target.value)*60;if(m<1440)change("end_time",String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"));}}><option value={duration}>{duration} hours (current)</option>{Array.from({length:48},(_,i)=>(i+1)/2).filter(h=>h!==duration&&Number(f.start_time.slice(0,2))*60+Number(f.start_time.slice(3))+h*60<1440).map(h=><option key={h} value={h}>{h} hours</option>)}</select></Field>
       <p className={clash?"text-red-700":"text-slate-600"}>{clash?"Selected time overlaps an existing reservation":"Reserved times: "+(slots.filter(x=>x.room_name===f.room_name).map(x=>x.start_time+"–"+x.end_time).join(", ")||"None shown")}</p>
       {field("Full name","name")}{field("Organization / Department","organization")}{field("Purpose","purpose")}{field("Email","email","email")}
+      <p className="text-sm text-slate-600">Use your university email (@chula.ac.th or @student.chula.ac.th). ISE Internal Users must sign in with their existing account.</p>
       {!token&&<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{await call("portalSendCode",{email:f.email});Q(true);M("Verification code sent");})}>Send verification code</button>}
       {!token&&sent&&<>{field("Verification code","code")}<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{const r=await call("portalVerifyCode",{email:f.email,code:f.code});T(r.guest_token);const q=await call("portalMyRequests",{guest_token:r.guest_token});R(q.requests);M("Email verified");})}>Verify email</button></>}
       {token&&<><p className="text-green-700">Email verified</p><button disabled={busy||clash||!Number.isFinite(duration)||duration<=0||!f.book_date||!f.name.trim()||!f.purpose.trim()} className="w-full bg-slate-900 text-white rounded-xl p-3 disabled:opacity-40" onClick={()=>run(async()=>{const r=await call("portalSubmit",{...f,guest_token:token});M("Pending approval: "+r.request_id);const q=await call("portalMyRequests",{guest_token:token});R(q.requests);})}>Submit for approval</button><button className="underline" disabled={busy} onClick={()=>run(async()=>R((await call("portalMyRequests",{guest_token:token})).requests))}>Refresh my requests</button></>}
@@ -1668,6 +1673,7 @@
     function AppRoot() {
       const [route, setRoute] = React.useState({ loading: true, mode: "" });
       const [page,setPage]=React.useState("");
+      const [redirect,setRedirect]=React.useState({email:"",notice:""});
 
       React.useEffect(() => {
         if (typeof google !== "undefined" && google.script?.url?.getLocation) {
@@ -1703,9 +1709,9 @@
 
       if (route.mode === "display") return <RoomDisplayApp />;
 
-      if(page==="guest"||(!page&&route.mode==="guest"))return <PublicBookingPortal back={()=>setPage("dashboard")}/>;
+      if(page==="guest"||(!page&&route.mode==="guest"))return <PublicBookingPortal back={()=>setPage("dashboard")} onInternal={(email,notice)=>{setRedirect({email,notice});setPage("dashboard");}}/>;
       if(page==="admin")return <BookingAdministration back={()=>setPage("dashboard")}/>;
-      return <RoomBookingDashboard openGuest={()=>setPage("guest")} openAdmin={()=>setPage("admin")}/>;
+      return <RoomBookingDashboard redirectEmail={redirect.email} redirectNotice={redirect.notice} openGuest={()=>{setRedirect({email:"",notice:""});setPage("guest");}} openAdmin={()=>setPage("admin")}/>;
     }
 
     root.render(<AppRoot />);
