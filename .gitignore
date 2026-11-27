@@ -1,0 +1,11 @@
+# Environment, credentials and remote backups
+.local/
+.clasp.json
+.clasp.*.json
+.clasprc*
+.env*
+*credentials*.json
+client_secret*.json
+node_modules/
+test-results/
+playwright-report/
