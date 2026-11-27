@@ -641,7 +641,7 @@
                 {authMode === "login" && (
                   <div className="space-y-4">
                     <div>
-                      <h2 className="text-xl font-black tracking-tight text-slate-900">Sign in</h2>
+                      <h2 className="text-xl font-black tracking-tight text-slate-900">ISE Internal User</h2>
                       <p className="text-sm text-slate-500 mt-1">Use the same allowed user sheet and account from your existing system.</p>
                     </div>
                     <Field label="Email">
@@ -971,6 +971,9 @@
                     <div className="grid md:grid-cols-2 gap-4">
                       <Field label="Start Time"><input type="time" value={form.start_time} onChange={e => setForm(prev => ({ ...prev, start_time: e.target.value }))} className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-white shadow-sm" /></Field>
                       <Field label="End Time"><input type="time" value={form.end_time} onChange={e => setForm(prev => ({ ...prev, end_time: e.target.value }))} className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-white shadow-sm" /></Field>
+                      <Field label="Duration (hours)" hint="Select a duration to calculate the end time, or edit End Time directly.">
+                        <input type="number" min="0.25" step="0.25" value={Math.max(0, (Number(form.end_time.slice(0,2))*60+Number(form.end_time.slice(3,5))-Number(form.start_time.slice(0,2))*60-Number(form.start_time.slice(3,5)))/60)} onChange={e => {const hours=Number(e.target.value); const end=Number(form.start_time.slice(0,2))*60+Number(form.start_time.slice(3,5))+Math.round(hours*60); if(hours>0 && end<1440) setForm(prev=>({...prev,end_time:String(Math.floor(end/60)).padStart(2,"0")+":"+String(end%60).padStart(2,"0")}));}} className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-white shadow-sm" />
+                      </Field>
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-4">
