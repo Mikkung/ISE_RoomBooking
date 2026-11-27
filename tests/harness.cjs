@@ -36,7 +36,7 @@ function harness(){
   const run=code=>vm.runInContext(code,c);const api=b=>c.apiRouter(b);
   function seed(){c.initializeUat_();return props.UAT_TEST_PASSWORD;}
   function login(role='internal'){return api({action:'roomLogin',email:role+'@ise-uat.example.invalid',password:props.UAT_TEST_PASSWORD});}
-  function guest(email='external@example.invalid'){api({action:'portalSendCode',email});const code=mail.at(-1).body.match(/\d{6}/)[0];return api({action:'portalVerifyCode',email,code}).guest_token;}
+  function guest(email='external@chula.ac.th'){api({action:'portalSendCode',email});const code=mail.at(-1).body.match(/\d{6}/)[0];return api({action:'portalVerifyCode',email,code}).guest_token;}
   return {c,run,api,props,cache,mail,books,seed,login,guest,advance(ms){clock+=ms;},get locked(){return locked;}};
 }
 module.exports={harness};
