@@ -20,27 +20,27 @@ test('internal login, direct booking, conflict, logout and unauthorized APIs',()
 test('external OTP verification, submission, pending state and request isolation',()=>{
  const h=setup(),token=h.guest();const r=h.api({action:'portalSubmit',...details,guest_token:token});assert.equal(r.ok,true);
  const mine=h.api({action:'portalMyRequests',guest_token:token});assert.equal(mine.requests[0].status,'PENDING');assert.equal(mine.requests[0].book_date,details.book_date);
- assert.equal(h.api({action:'portalMyRequests',guest_token:h.guest('other@example.invalid')}).requests.length,0);
+ assert.equal(h.api({action:'portalMyRequests',guest_token:h.guest('other@chula.ac.th')}).requests.length,0);
  assert.equal(h.api({action:'portalSubmit',...details,guest_token:token}).ok,false);
 });
 test('OTP wrong attempts, expiry, replay, resend rate limit and feature gate',()=>{
- const h=setup(),email='guest@example.invalid';assert.equal(h.api({action:'portalSendCode',email}).ok,true);
+ const h=setup(),email='guest@chula.ac.th';assert.equal(h.api({action:'portalSendCode',email}).ok,true);
  const code=h.mail.at(-1).body.match(/\d{6}/)[0];assert.equal(h.api({action:'portalSendCode',email}).ok,false);
  for(let i=0;i<5;i++)assert.equal(h.api({action:'portalVerifyCode',email,code:'wrong'}).ok,false);
  assert.equal(h.api({action:'portalVerifyCode',email,code}).ok,false);
  h.advance(600001);assert.equal(h.api({action:'portalVerifyCode',email,code}).ok,false);
- const token=h.guest('replay@example.invalid');assert.ok(token);const correct=h.mail.at(-1).body.match(/\d{6}/)[0];assert.equal(h.api({action:'portalVerifyCode',email:'replay@example.invalid',code:correct}).ok,false);
+ const token=h.guest('replay@chula.ac.th');assert.ok(token);const correct=h.mail.at(-1).body.match(/\d{6}/)[0];assert.equal(h.api({action:'portalVerifyCode',email:'replay@chula.ac.th',code:correct}).ok,false);
  h.props.PUBLIC_BOOKING_ENABLED='false';assert.equal(h.api({action:'portalVerifyCode',email,code}).ok,false);assert.equal(h.api({action:'portalSubmit',guest_token:token,...details}).ok,false);
 });
-test('OTP daily quota and expired guest session',()=>{const h=setup();h.props.PORTAL_OTP_QUOTA=JSON.stringify({day:h.c.fmtDate_(new Date()),count:100});assert.equal(h.api({action:'portalSendCode',email:'x@example.invalid'}).ok,false);delete h.props.PORTAL_OTP_QUOTA;const t=h.guest();h.advance(3600001);assert.equal(h.api({action:'portalMyRequests',guest_token:t}).ok,false);});
-test('known internal account cannot submit as guest',()=>{const h=setup();const t=h.guest('internal@ise-uat.example.invalid');assert.equal(h.api({action:'portalSubmit',...details,guest_token:t}).ok,false);});
+test('OTP daily quota and expired guest session',()=>{const h=setup();h.props.PORTAL_OTP_QUOTA=JSON.stringify({day:h.c.fmtDate_(new Date()),count:100});assert.equal(h.api({action:'portalSendCode',email:'x@chula.ac.th'}).ok,false);delete h.props.PORTAL_OTP_QUOTA;const t=h.guest();h.advance(3600001);assert.equal(h.api({action:'portalMyRequests',guest_token:t}).ok,false);});
+test('known internal account cannot submit as guest',()=>{const h=setup();const email='internal@ise-uat.example.invalid';assert.equal(h.api({action:'portalSendCode',email}).error_code,'ISE_INTERNAL_USER');assert.equal(h.mail.length,0);assert.equal(h.api({action:'portalVerifyCode',email,code:'123456'}).error_code,'ISE_INTERNAL_USER');});
 test('approval center, approved booking, repeat decision and opposing decision',()=>{
  const h=setup(),r=submit(h);assert.equal(act(h,'approver','portalRequests').requests.length,1);
  const b={request_id:r.request_id,decision:'APPROVED'};assert.equal(act(h,'approver','portalDecide',b).ok,true);assert.equal(act(h,'approver','portalDecide',b).already_decided,true);
  assert.equal(act(h,'approver','portalDecide',{...b,decision:'REJECTED',reason:'No'}).ok,false);assert.equal(h.c.getActiveRoomBookingsByDate_(details.book_date).length,1);
 });
 test('rejection requires reason and creates no booking',()=>{const h=setup(),r=submit(h);const b={request_id:r.request_id,decision:'REJECTED'};assert.equal(act(h,'approver','portalDecide',b).ok,false);assert.equal(act(h,'approver','portalDecide',{...b,reason:'Synthetic rejection'}).ok,true);assert.equal(h.c.getActiveRoomBookingsByDate_(details.book_date).length,0);});
-test('competing pending approvals serialize to one winning booking',()=>{const h=setup(),a=submit(h),b=submit(h,{guest_token:h.guest('second@example.invalid')});assert.equal(a.ok,true);assert.equal(b.ok,true);assert.equal(act(h,'approver','portalDecide',{request_id:a.request_id,decision:'APPROVED'}).ok,true);assert.equal(act(h,'approver','portalDecide',{request_id:b.request_id,decision:'APPROVED'}).ok,false);assert.equal(h.locked,false);});
+test('competing pending approvals serialize to one winning booking',()=>{const h=setup(),a=submit(h),b=submit(h,{guest_token:h.guest('second@chula.ac.th')});assert.equal(a.ok,true);assert.equal(b.ok,true);assert.equal(act(h,'approver','portalDecide',{request_id:a.request_id,decision:'APPROVED'}).ok,true);assert.equal(act(h,'approver','portalDecide',{request_id:b.request_id,decision:'APPROVED'}).ok,false);assert.equal(h.locked,false);});
 test('partial approval retry recovers without duplicate and cannot reject created booking',()=>{
  const h=setup(),r=submit(h),write=h.c.portalWrite_;let fail=true;h.c.portalWrite_=(...args)=>{if(fail&&args[2].status==='APPROVED'){fail=false;throw Error('Injected write failure');}return write(...args);};
  assert.throws(()=>act(h,'approver','portalDecide',{request_id:r.request_id,decision:'APPROVED'}),/Injected/);
@@ -75,3 +75,5 @@ test('all Google callable helpers remain private; photos unchanged',()=>{
  const fs=require('node:fs'),cp=require('node:child_process');const code=fs.readFileSync('Code.gs','utf8');const names=[...code.matchAll(/^function (\w+)\(/gm)].map(m=>m[1]);assert.deepEqual(names.filter(n=>!n.endsWith('_')).sort(),['apiRouter','doGet','doPost']);
  const html=fs.readFileSync('Index.html','utf8'),before=cp.execFileSync('git',['show','HEAD:Index.html'],{maxBuffer:3000000}).toString();assert.deepEqual(html.match(/data:image\/jpeg;base64,[^"]+/g),before.match(/data:image\/jpeg;base64,[^"]+/g));
 });
+
+test('exact guest domains and private single mailbox exception',()=>{const h=setup();h.props.BOOKING_TEST_EMAIL='authorized-test@gmail.com';for(const email of ['x@chula.ac.th.evil.com','x@fakechula.ac.th','x@gmail.com','x@sub.student.chula.ac.th']){assert.equal(h.api({action:'portalSendCode',email}).error_code,'EMAIL_DOMAIN_NOT_ALLOWED');assert.equal(h.api({action:'portalVerifyCode',email,code:'123456'}).error_code,'EMAIL_DOMAIN_NOT_ALLOWED');}assert.equal(h.mail.length,0);for(const email of ['X@CHULA.AC.TH','x@student.chula.ac.th','authorized-test@gmail.com'])assert.equal(h.api({action:'portalSendCode',email}).ok,true);const token=h.guest('another@chula.ac.th');const sh=h.c.getAllowlistSheet_();sh.sh.appendRow(['another@chula.ac.th','new','TRUE']);assert.equal(h.api({action:'portalSubmit',...details,guest_token:token}).error_code,'ISE_INTERNAL_USER');});
