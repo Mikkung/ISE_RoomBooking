@@ -1,6 +1,6 @@
 # M4 UAT deployment and rollback
 
-Status on 2026-11-27 (Asia/Bangkok): the owner completed prepareUat_ and supplied its successful Google execution log (11:59:29–12:00:42). Database initialization and the UAT ID audit passed, followed by seven real-service smoke checks. UAT version 1, built from b8adb0c, is deployed. Email delivery and simultaneous authenticated execution tests remain unverified. Production and Check_In_App were not changed; main was not merged.
+Status on 2026-11-27 (Asia/Bangkok): the owner completed prepareUat_ and supplied its successful Google execution log (11:59:29–12:00:42). Database initialization and the UAT ID audit passed, followed by seven real-service smoke checks. UAT version 1, built from b8adb0c, is deployed. Live emailed OTP verification, approver grant/revoke, recurring booking, approved/rejected states, idempotent retry and simultaneous overlapping approvals passed. See M4_TEST_REPORT.md for precise mocked/actual coverage and remaining integration limits. Production and Check_In_App were not changed; main was not merged.
 
 ## Current UAT deployment
 
