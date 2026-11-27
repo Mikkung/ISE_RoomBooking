@@ -1538,6 +1538,16 @@ function portalRoles_(email) {
   return {admin:admin,approver:approver};
 }
 function portalError_(error){return {ok:false,error:error};}
+// The single test mailbox is configured privately in Script Properties.
+function portalGuestEligibility_(email) {
+  email=normalizeEmail_(email);
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return {ok:false,error_code:"INVALID_EMAIL",error:"Enter a valid email address."};
+  if(findAllowedUserByEmail_(email)||findUserByEmail_(email))return {ok:false,error_code:"ISE_INTERNAL_USER",error:"Please use ISE Internal User sign in. You will be redirected automatically."};
+  const exception=normalizeEmail_(PropertiesService.getScriptProperties().getProperty("BOOKING_TEST_EMAIL"));
+  const domain=email.split("@")[1];
+  if(domain!=="chula.ac.th"&&domain!=="student.chula.ac.th"&&(!exception||email!==exception))return {ok:false,error_code:"EMAIL_DOMAIN_NOT_ALLOWED",error:"Please use a Chulalongkorn University email (@chula.ac.th or @student.chula.ac.th)."};
+  return {ok:true};
+}
 function portalToken_(){return Utilities.getUuid()+Utilities.getUuid();}
 function portalMail_(email,subject,message){try{MailApp.sendEmail(email,subject,message);return true;}catch(e){return false;}}
 function portalDispatch_(b) {
@@ -1553,6 +1563,7 @@ function portalDispatch_(b) {
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return portalError_("Invalid email");
     if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
     return portalLock_(function(){
+      const eligibility=portalGuestEligibility_(email);if(!eligibility.ok)return eligibility;
       const cache=CacheService.getScriptCache(), key="portal_otp_"+sha256Hex_(email);
       if(cache.get(key))return portalError_("Please wait before requesting another code");
       const day=fmtDate_(nowBangkok_()), quotaKey="PORTAL_OTP_QUOTA", quota=JSON.parse(props.getProperty(quotaKey)||"{}");
@@ -1568,6 +1579,7 @@ function portalDispatch_(b) {
   if(a==="portalVerifyCode"){
     return portalLock_(function(){
       const email=normalizeEmail_(b.email),cache=CacheService.getScriptCache(),key="portal_otp_"+sha256Hex_(email),raw=cache.get(key);
+      const eligibility=portalGuestEligibility_(email);if(!eligibility.ok)return eligibility;
       if(!raw)return portalError_("Invalid or expired code");
       const v=JSON.parse(raw);
       if(v.expires<=Date.now()||v.attempts>=5){cache.remove(key);return portalError_("Invalid or expired code");}
@@ -1579,9 +1591,10 @@ function portalDispatch_(b) {
     if(props.getProperty("PUBLIC_BOOKING_ENABLED")!=="true")return portalError_("External booking is not enabled");
     const email=CacheService.getScriptCache().get("portal_guest_"+sha256Hex_(String(b.guest_token||"")));
     if(!email)return portalError_("Verify your email again");
+    const eligibility=portalGuestEligibility_(email);if(!eligibility.ok)return eligibility;
     if(a==="portalMyRequests")return {ok:true,requests:portalRows_(portalSheet_("BookingRequests",PORTAL_REQUEST_HEADERS)).filter(r=>r.email===email)};
-    if(findAllowedUserByEmail_(email)||findUserByEmail_(email))return portalError_("Please sign in as ISE Internal User");
     return portalLock_(function(){
+      const eligibility=portalGuestEligibility_(email);if(!eligibility.ok)return eligibility;
       const room=String(b.room_name||""),date=String(b.book_date||""),start=String(b.start_time||""),end=String(b.end_time||"");
       const name=String(b.name||"").trim(),org=String(b.organization||"").trim(),purpose=String(b.purpose||"").trim();
       if(!ROOMS.includes(room)||!validYMD_(date)||date<fmtDate_(nowBangkok_())||!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||start>=end||!name||!purpose||name.length>200||org.length>200||purpose.length>1000)return portalError_("Invalid booking details");
