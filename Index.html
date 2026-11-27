@@ -180,7 +180,8 @@
       );
     }
 
-    function RoomBookingDashboard() {
+    function RoomBookingDashboard({openGuest,openAdmin}) {
+      const [portalRoles,setPortalRoles]=useState({});
       const [selectedDate, setSelectedDate] = useState(todayKey());
       const [calendarMonth, setCalendarMonth] = useState(todayKey().slice(0, 7));
       const [bookings, setBookings] = useState([]);
@@ -212,6 +213,7 @@
         recurrence_until: "",
       });
 
+      useEffect(()=>{setPortalRoles({});if(currentUser)apiPost({action:"portalRoles"}).then(r=>{if(r.ok)setPortalRoles(r);}).catch(()=>{});},[currentUser]);
       const getStoredSessionToken = () => localStorage.getItem("room_dash_session_token") || "";
       const setStoredSessionToken = (token) => localStorage.setItem("room_dash_session_token", token);
       const clearStoredSessionToken = () => localStorage.removeItem("room_dash_session_token");
@@ -715,6 +717,7 @@
               </div>
             )}
             {AuthShell}
+            <div className="max-w-7xl mx-auto px-5 pb-5"><button onClick={openGuest} className="border rounded-xl bg-white p-3 font-semibold">External User — Request a room</button></div>
           </div>
         );
       }
@@ -761,6 +764,7 @@
                     <button className={`px-4 py-3 text-sm font-semibold ${viewMode === "week" ? "bg-white text-slate-900" : "text-white"}`} onClick={() => setViewMode("week")}>7-Day Snapshot</button>
                     <button className={`px-4 py-3 text-sm font-semibold ${viewMode === "calendar" ? "bg-white text-slate-900" : "text-white"}`} onClick={() => setViewMode("calendar")}>Calendar</button>
                   </div>
+                  {portalRoles.approver&&<button onClick={openAdmin} className="border border-white/30 rounded-xl px-3 py-2">Approval Center</button>}
                   <button onClick={handleLogout} className="p-2 bg-red-50 text-red-700 border border-red-200 rounded-full hover:bg-red-100 transition"
                   >Log out</button>
                 </div>
@@ -1623,8 +1627,46 @@
       return params.get(key) || "";
     }
 
+
+    function PublicBookingPortal({back}) {
+      const [f,S]=useState({email:"",code:"",name:"",organization:"",room_name:ROOMS[0],book_date:todayKey(),start_time:"09:00",end_time:"10:00",purpose:""});
+      const [token,T]=useState("");const [sent,Q]=useState(false);const [busy,B]=useState(false);const [msg,M]=useState("");const [slots,V]=useState([]);const [requests,R]=useState([]);
+      const change=(k,v)=>S(p=>({...p,[k]:v}));
+      const call=async(action,extra={})=>{const r=await apiPost({action,...extra});if(!r.ok)throw Error(r.error);return r;};
+      useEffect(()=>{let live=true;V([]);call("portalAvailability",{book_date:f.book_date}).then(r=>{if(live)V(r.bookings||[]);}).catch(e=>{if(live)M(e.message);});return()=>{live=false;};},[f.book_date]);
+      const run=async(fn)=>{B(true);M("");try{await fn();}catch(e){M(e.message);}finally{B(false);}};
+      const duration=(Number(f.end_time.slice(0,2))*60+Number(f.end_time.slice(3))-Number(f.start_time.slice(0,2))*60-Number(f.start_time.slice(3)))/60;
+      const clash=slots.some(x=>x.room_name===f.room_name&&x.start_time<f.end_time&&x.end_time>f.start_time);
+      const field=(label,k,type="text")=><Field label={label}><input className="w-full border rounded-xl p-3" type={type} value={f[k]} onChange={e=>change(k,e.target.value)} disabled={k==="email"&&!!token}/></Field>;
+      return <main className="max-w-3xl mx-auto p-4 space-y-4"><header className="bg-slate-900 text-white rounded-2xl p-5"><h1 className="text-2xl font-bold">ISE Room Booking</h1><p>External User</p><button className="underline mt-2" onClick={back}>ISE Internal User sign in</button></header>
+      <section className="bg-white border rounded-2xl p-4 space-y-3">
+      <Field label="Room"><select className="w-full border rounded-xl p-3" value={f.room_name} onChange={e=>change("room_name",e.target.value)}>{ROOMS.map(x=><option key={x}>{x}</option>)}</select></Field>
+      {ROOM_IMAGES[f.room_name]&&<img className="w-full max-h-48 object-cover rounded-xl" src={ROOM_IMAGES[f.room_name]} alt={f.room_name}/>}
+      {field("Date","book_date","date")}<div className="grid sm:grid-cols-2 gap-3">{field("Start time","start_time","time")}{field("End time","end_time","time")}</div>
+      <Field label="Duration (hours)"><select className="w-full border rounded-xl p-3" value={duration} onChange={e=>{const m=Number(f.start_time.slice(0,2))*60+Number(f.start_time.slice(3))+Number(e.target.value)*60;if(m<1440)change("end_time",String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"));}}><option value={duration}>{duration} hours (current)</option>{Array.from({length:48},(_,i)=>(i+1)/2).filter(h=>h!==duration&&Number(f.start_time.slice(0,2))*60+Number(f.start_time.slice(3))+h*60<1440).map(h=><option key={h} value={h}>{h} hours</option>)}</select></Field>
+      <p className={clash?"text-red-700":"text-slate-600"}>{clash?"Selected time overlaps an existing reservation":"Reserved times: "+(slots.filter(x=>x.room_name===f.room_name).map(x=>x.start_time+"–"+x.end_time).join(", ")||"None shown")}</p>
+      {field("Full name","name")}{field("Organization / Department","organization")}{field("Purpose","purpose")}{field("Email","email","email")}
+      {!token&&<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{await call("portalSendCode",{email:f.email});Q(true);M("Verification code sent");})}>Send verification code</button>}
+      {!token&&sent&&<>{field("Verification code","code")}<button disabled={busy} className="border rounded-xl p-3" onClick={()=>run(async()=>{const r=await call("portalVerifyCode",{email:f.email,code:f.code});T(r.guest_token);const q=await call("portalMyRequests",{guest_token:r.guest_token});R(q.requests);M("Email verified");})}>Verify email</button></>}
+      {token&&<><p className="text-green-700">Email verified</p><button disabled={busy||clash||duration<=0||!f.name.trim()||!f.purpose.trim()} className="w-full bg-slate-900 text-white rounded-xl p-3 disabled:opacity-40" onClick={()=>run(async()=>{const r=await call("portalSubmit",{...f,guest_token:token});M("Pending approval: "+r.request_id);const q=await call("portalMyRequests",{guest_token:token});R(q.requests);})}>Submit for approval</button><button className="underline" disabled={busy} onClick={()=>run(async()=>R((await call("portalMyRequests",{guest_token:token})).requests))}>Refresh my requests</button></>}
+      <p role="status" className="break-words">{msg}</p></section>
+      {requests.map(r=><article key={r.request_id} className="border rounded-xl p-4 bg-white"><b>{r.room_name}</b><p>{r.book_date} · {r.start_time}–{r.end_time}</p><p>{r.status} {r.reason}</p></article>)}</main>;
+    }
+    function BookingAdministration({back}) {
+      const [roles,S]=useState({});const [req,R]=useState([]);const [data,D]=useState({users:[],approvers:[]});const [target,T]=useState("");const [msg,M]=useState("");const [busy,B]=useState(false);
+      const call=async(action,extra={})=>{const r=await apiPost({action,...extra});if(!r.ok)throw Error(r.error);return r;};
+      const refresh=async()=>{const r=await call("portalRoles");S(r);if(r.approver)R((await call("portalRequests")).requests);if(r.admin)D(await call("portalApprovers"));};
+      const run=async(fn)=>{B(true);M("");try{await fn();}catch(e){M(e.message);}finally{B(false);}};
+      useEffect(()=>{run(refresh);},[]);
+      return <main className="max-w-4xl mx-auto p-4 space-y-4"><button onClick={back} className="underline">Back to dashboard</button><h1 className="text-2xl font-bold">Approval Center</h1><button disabled={busy} onClick={()=>run(refresh)} className="border rounded-xl p-2">Refresh</button><p role="status">{msg}</p>
+      {roles.approver&&req.map(r=><section key={r.request_id} className="bg-white border rounded-xl p-4 space-y-2 break-words"><b>{r.room_name}</b><p>{r.book_date} · {r.start_time}–{r.end_time}</p><p>{r.name} · {r.organization} · {r.email}</p><p>{r.purpose}</p><p>{r.status} {r.reason}</p>{r.status==="PENDING"&&<div className="flex gap-2">{["APPROVED","REJECTED"].map(decision=><button key={decision} disabled={busy} className="border rounded-lg p-2" onClick={()=>{const reason=decision==="REJECTED"?window.prompt("Reason for rejection"):"";if(decision==="REJECTED"&&!reason)return;run(async()=>{const x=await call("portalDecide",{request_id:r.request_id,decision,reason});await refresh();M(x.notified?"Decision saved":"Decision saved; email notification failed");});}}>{decision==="APPROVED"?"Approve":"Reject"}</button>)}</div>}</section>)}
+      {roles.admin&&<section className="border rounded-xl p-4 space-y-3"><h2 className="font-bold">Manage Approvers</h2>{data.approvers.filter(x=>x.active==="TRUE").map(x=><div key={x.email} className="flex flex-wrap gap-2 items-center"><span className="break-all">{x.email}</span><button disabled={busy} className="border rounded p-2" onClick={()=>run(async()=>D(await call("portalSetApprover",{email:x.email,active:false})))}>Revoke</button></div>)}<select className="w-full border rounded p-3" value={target} onChange={e=>T(e.target.value)}><option value="">Select ISE Internal User</option>{data.users.filter(u=>!data.approvers.some(x=>x.email===u.email&&x.active==="TRUE")).map(u=><option key={u.email} value={u.email}>{u.name} ({u.email})</option>)}</select><button disabled={busy||!target} className="border rounded p-3" onClick={()=>run(async()=>{D(await call("portalSetApprover",{email:target,active:true}));T("");})}>Grant approval access</button></section>}
+      {!busy&&!roles.approver&&<p>No approval access.</p>}</main>;
+    }
+
     function AppRoot() {
       const [route, setRoute] = React.useState({ loading: true, mode: "" });
+      const [page,setPage]=React.useState("");
 
       React.useEffect(() => {
         if (typeof google !== "undefined" && google.script?.url?.getLocation) {
@@ -1660,7 +1702,9 @@
 
       if (route.mode === "display") return <RoomDisplayApp />;
 
-      if (typeof RoomBookingDashboard === "function") return <RoomBookingDashboard />;
+      if(page==="guest"||(!page&&route.mode==="guest"))return <PublicBookingPortal back={()=>setPage("dashboard")}/>;
+      if(page==="admin")return <BookingAdministration back={()=>setPage("dashboard")}/>;
+      return <RoomBookingDashboard openGuest={()=>setPage("guest")} openAdmin={()=>setPage("admin")}/>;
       return <RoomDisplayApp />;
     }
 
