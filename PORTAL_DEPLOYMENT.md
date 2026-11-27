@@ -1,14 +1,23 @@
 # M4 UAT deployment and rollback
 
-Status on 2026-11-27 (Asia/Bangkok): source uploaded to the user-designated UAT project. Web-app deployment is blocked on Google runtime authorization and database verification. M4 is not complete. Production and Check_In_App were not changed; main was not merged.
+Status on 2026-11-27 (Asia/Bangkok): the owner completed prepareUat_ and supplied its successful Google execution log (11:59:29–12:00:42). Database initialization and the UAT ID audit passed, followed by seven real-service smoke checks. UAT version 1, built from b8adb0c, is deployed. Email delivery and simultaneous authenticated execution tests remain unverified. Production and Check_In_App were not changed; main was not merged.
 
-## Required owner action
+## Current UAT deployment
 
-Open the supplied UAT Apps Script project, select `UatSetup.gs`, select `prepareUat_`, and click Run. Complete Google's authorization consent. This private function is deliberately unavailable to browser RPC and the API router. It creates three **new** spreadsheets with synthetic accounts, sets Script Properties, audits all configured IDs, and runs a limited Google-service smoke test. It does not copy or open any of the old production databases. Send back the redacted execution log or error, never credentials.
+- Booking portal: https://script.google.com/macros/s/AKfycbxyrkHt_zkkNJVgPqbvGMz6MZ0sCPGkNleo2aHOdeO6vGoubeXF4zjrPsYpG3yxqQ8/exec
+- External portal: https://script.google.com/macros/s/AKfycbxyrkHt_zkkNJVgPqbvGMz6MZ0sCPGkNleo2aHOdeO6vGoubeXF4zjrPsYpG3yxqQ8/exec?mode=guest
+- Room Display: https://script.google.com/macros/s/AKfycbxyrkHt_zkkNJVgPqbvGMz6MZ0sCPGkNleo2aHOdeO6vGoubeXF4zjrPsYpG3yxqQ8/exec?mode=display
+- Version: 1. Deployment ID: AKfycbxyrkHt_zkkNJVgPqbvGMz6MZ0sCPGkNleo2aHOdeO6vGoubeXF4zjrPsYpG3yxqQ8.
+- Display requires the synthetic device token from the UAT RoomDisplayDevices tab. Internal accounts use UAT_TEST_PASSWORD from private Script Properties. Do not share tokens/passwords in URLs or commits.
+- Actual network/browser smoke checks: run `node tools/uat-live-smoke.cjs`; target metadata is in ignored .local/uat-deployment.json. These checks use real Google services. See M4_TEST_REPORT.md for their outcome.
+
+## Owner setup (completed)
+
+For a fresh authorized UAT setup, open the supplied UAT Apps Script project, select `UatSetup.gs`, select `prepareUat_`, and click Run. Complete Google's authorization consent. This private function is deliberately unavailable to browser RPC and the API router. It creates three **new** spreadsheets with synthetic accounts, sets Script Properties, audits all configured IDs, and runs a limited Google-service smoke test. It does not copy or open any of the old production databases. Send back the redacted execution log or error, never credentials.
 
 The editor is https://script.google.com/home/projects/1uf9A-IBz9OqJ6mux5dnkVyIPeXIKECvEZ5U1S6gwZSXu1pfsOsn61CAD/edit . Clasp push works, but `clasp run initializeUat_` returned "Unable to run script function. Please make sure you have permission to run the script function." Installing/authenticating clasp alone does not establish remote execution permissions. See Google's [execution API requirements](https://developers.google.com/apps-script/api/how-tos/execute).
 
-`prepareUat_` uses actual Sheets, CacheService and LockService only when run in Google. Its local harness test is mocked and is not proof of Google runtime success. Its report leaves email delivery, external OTP and simultaneous executions explicitly NOT_TESTED. Synthetic `.invalid` mailboxes cannot receive real mail; an authorized reachable test mailbox is still needed for delivery UAT.
+`prepareUat_` uses actual Sheets, CacheService and LockService only when run in Google. Its local harness test is mocked; the owner-supplied Google execution log separately confirms the seven real runtime checks passed. Its report leaves email delivery, external OTP and simultaneous executions explicitly NOT_TESTED. Synthetic `.invalid` mailboxes cannot receive real mail; a reachable test mailbox was subsequently authorized and a real OTP send was accepted; inbox receipt/verification is tracked separately.
 
 ## Environment isolation
 
@@ -22,7 +31,7 @@ The editor is https://script.google.com/home/projects/1uf9A-IBz9OqJ6mux5dnkVyIPe
 
 ## Deploy after authorization and verification
 
-1. Review the prepareUat_ execution report, then run `auditUat_` in the editor. Verify APP_ENV=UAT, the expected Script ID, and the new spreadsheet titles beginning `ISE RoomBooking UAT synthetic `. Confirm all four configured IDs are in the generated registry; do not substitute old IDs.
+1. Review the prepareUat_ execution report; that function already runs `auditUat_` before its smoke checks. Verify APP_ENV=UAT, the expected Script ID, and the new spreadsheet titles beginning `ISE RoomBooking UAT synthetic `. Confirm all four configured IDs are in the generated registry; do not substitute old IDs.
 2. Run `npm ci`, `npm test`, and `npm run test:e2e` (requires installed Chrome). Inspect rendered screenshots in ignored test-results/. These use mocked Google services.
 3. `clasp -P <absolute-path-to-local-.clasp.json> show-file-status` must list only the five files above. Push with `clasp -P <absolute-path-to-local-.clasp.json> push --force`. --force confirms manifest replacement; it does not authorize changing environments.
 4. Record the current version/deployment inventory. Create a UAT version and deployment using `clasp create-version` and `clasp create-deployment`, or the editor's New deployment -> Web app. Use execute as deployer and anonymous access for the guest portal. Authorize required Sheets/Mail scopes. Do not deploy while the database audit is unverified.
@@ -31,7 +40,7 @@ The editor is https://script.google.com/home/projects/1uf9A-IBz9OqJ6mux5dnkVyIPe
 
 ## Rollback
 
-For a future versioned UAT deployment, record its deployment ID and prior version before updating. Use `clasp update-deployment <UAT_DEPLOYMENT_ID> --versionNumber <PREVIOUS_VERSION>` to restore the same URL (check installed CLI help for options). Set PUBLIC_BOOKING_ENABLED=false to stop new guest availability/OTP/submission/approval. Preserve UAT sheets for investigation; do not delete or overwrite booking records. No earlier numbered web deployment exists in this session, so initial rollback is to disable the newly created UAT deployment if necessary. The original empty source backup is local; restoring that source alone does not roll back a versioned deployment.
+For a future versioned UAT deployment, record its deployment ID and prior version before updating. Use `clasp update-deployment <UAT_DEPLOYMENT_ID> --versionNumber <PREVIOUS_VERSION>` to restore the same URL (check installed CLI help for options). Set PUBLIC_BOOKING_ENABLED=false to stop new guest availability/OTP/submission/approval. Preserve UAT sheets for investigation; do not delete or overwrite booking records. Version 1 is the initial numbered web deployment. There is no prior working numbered release; initial rollback is to disable this UAT deployment if necessary. Before a later update, retain version 1 as the rollback target. The original empty source backup is local; restoring that source alone does not roll back a versioned deployment.
 
 ## Cross-system integration
 
